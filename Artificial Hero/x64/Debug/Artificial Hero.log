@@ -1,0 +1,11 @@
+﻿  Dungeon.cpp
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(114,20): warning C4244: 'initializing': conversion from 'double' to 'long', possible loss of data
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(115,31): warning C4244: '+=': conversion from 'double' to 'long', possible loss of data
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(116,21): warning C4244: '+=': conversion from 'double' to 'long', possible loss of data
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(117,21): warning C4244: '+=': conversion from 'double' to 'long', possible loss of data
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(597,33): warning C4244: 'argument': conversion from '_Rep' to 'unsigned int', possible loss of data
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(597,33): warning C4244:         with
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(597,33): warning C4244:         [
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(597,33): warning C4244:             _Rep=__int64
+C:\Users\chemb\Documents\GitHub\ArtificialHero\Artificial Hero\Dungeon.cpp(597,33): warning C4244:         ]
+  Artificial Hero.vcxproj -> C:\Users\chemb\Documents\GitHub\ArtificialHero\x64\Debug\Artificial Hero.exe
