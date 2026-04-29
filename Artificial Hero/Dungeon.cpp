@@ -34,19 +34,21 @@ public:
     int curEnergy;			        //Current stored energy (-x energy per attack, cannot attack if below x)
     int attackCost;                 //Energy used per attack (see above)
         //Battle
-    long attack;                     //Damage dealt to enemy
+    long attack;                    //Damage dealt to enemy
     int isDefending;                //Whether hero is defending; -1 for false, 1 for true; Defending halves incoming damage for x turns
     int defenseDuration;            //Remaining defense turns
     int maxDefenseDuration;         //Starting number for defenseDuration
         //Misc
     long gold;						//Used to buy upgrades, potions, and supplies; Used for final scoring
+    long goldSpent;                 //Used for scoring
     long potions;					//Used to heal mid-battle
     long supplies;					//Used to restore health & energy while resting
     long kills;						//Used for final scoring
-    long upgrades;                   //# of upgrades purchased, used for final scoring
+    long upgrades;                  //# of upgrades purchased, used for final scoring
     int invalidMoves;               //# of moves that do nothing, used for final scoring
     bool lastMoveWasInvalid;        //Whether the last move did anything
-    long turnsSurvived;              //How long the hero has survived
+    long turnsSurvived;             //How long the hero has survived
+    bool visitedShop;               //Used for scoring
 
     //Set the variables
     Hero(long maxHealth, int maxEnergy, int attackCost, long attack, long gold, long potions, long supplies) {
@@ -64,6 +66,7 @@ public:
         this->maxDefenseDuration = 3;
         //set misc stats
         this->gold = gold;
+        this->goldSpent = 0;
         this->potions = potions;
         this->supplies = supplies;
         this->kills = 0;
@@ -71,6 +74,7 @@ public:
         this->invalidMoves = 0;
         this->lastMoveWasInvalid = false;
         this->turnsSurvived = 0;
+        this->visitedShop = false;
     }
 
     //Reset the variables for repeated runs
@@ -89,6 +93,7 @@ public:
         this->maxDefenseDuration = 3;
         //set misc stats
         this->gold = gold;
+        this->goldSpent = 0;
         this->potions = potions;
         this->supplies = supplies;
         this->kills = 0;
@@ -96,6 +101,7 @@ public:
         this->invalidMoves = 0;
         this->lastMoveWasInvalid = false;
         this->turnsSurvived = 0;
+        this->visitedShop = false;
     }
 
     //Print all player stats
@@ -110,12 +116,14 @@ public:
     }
 
     //Calculate final score
-    int calcFitness() {
-        long score = pow(kills, 2) / 2;
-        score += pow(gold, 2) / 50;
-        score += pow(upgrades, 2);
-        score += log(turnsSurvived);
+    long calcFitness() {
+        long score = kills * 3;
+        score += goldSpent;
+        score += upgrades * 5;
+        score += (upgrades * kills) / (gold + 1);
+        score += turnsSurvived / 20;
         score -= invalidMoves * 3;
+        score += visitedShop ? 5 : 0;
         return score;
     }
 };
@@ -162,6 +170,7 @@ public:
                     resting = false;
                     inShop = true;
                     hero->lastMoveWasInvalid = false;
+                    if (!hero->visitedShop) hero->visitedShop = true;
                     if (print) cout << "Moved from Resting to Shop." << endl;
                     break;
                 case '3':
@@ -189,6 +198,7 @@ public:
                 case '1':
                     if (hero->gold >= potionCost) {
                         hero->gold -= potionCost;
+                        hero->goldSpent += potionCost;
                         hero->potions += potionsPerPurchase;
                         if (print) cout << "You bought " << potionsPerPurchase << " potions for " << potionCost << " gold." << endl;
                         hero->lastMoveWasInvalid = false;
@@ -202,6 +212,7 @@ public:
                 case '2':
                     if (hero->gold >= suppliesCost) {
                         hero->gold -= suppliesCost;
+                        hero->gold += suppliesCost;
                         hero->supplies += suppliesPerPurchase;
                         if (print) cout << "You bought " << suppliesPerPurchase << " supplies for " << suppliesCost << " gold." << endl;
                         hero->lastMoveWasInvalid = false;
@@ -215,8 +226,10 @@ public:
                 case '3':
                     if (hero->gold >= upgradeCost) {
                         hero->gold -= upgradeCost;
+                        hero->goldSpent += upgradeCost;
                         hero->maxHealth += healthUpgrade;
                         hero->attack += attackUpgrade;
+                        hero->upgrades++;
                         if (print) cout << "You upgraded your equipment for " << upgradeCost << " gold." << endl;
                         hero->lastMoveWasInvalid = false;
                     }
@@ -287,7 +300,7 @@ public:
 
     vector<double> calcInputs() {
         vector<double> inputs;
-        inputs.resize(12, 0);
+        inputs.resize(12, -1.0);
         inputs[0] = (double) hero->curHealth / hero->maxHealth;                          //Health %
         inputs[1] = (double) hero->curEnergy / hero->maxEnergy;                          //Energy %
         inputs[2] = (double) hero->gold / (hero->gold + 50);                             //Gold (normalized)
@@ -373,10 +386,10 @@ public:
     vector<vector<vector<double>>> weights;     //All weights for the network - read as weights[layer][weight index][neuron] (to allow matrix calculations)
     vector<vector<double>> biases;              //All biases for the network - read as biases[layer][neuron]
 
-    Brain(int inputs, vector<int> layers) {
+    Brain(int inputs, vector<int> layers, uniform_real_distribution<double> random, default_random_engine engine) {
         this->inputs = inputs;
         this->layers = layers;
-        createRandomWeights();
+        createRandomWeights(random, engine);
     }
 
     Brain(int inputs, vector<int> layers, vector<vector<vector<double>>> weights, vector<vector<double>> biases) {
@@ -390,31 +403,31 @@ public:
         return new Brain(inputs, layers, weights, biases);
     }
 
-    Brain* reproduce() {
+    Brain* reproduce(uniform_real_distribution<double> random, default_random_engine engine) {
 
         Brain* child = new Brain(inputs, layers, weights, biases);
 
-        //Slightly modify weights - 15% chance to change at all, 2.5% chance to be completely re-randomized
+        //Slightly modify weights - 20% chance to change at all, 5% chance to be completely re-randomized
         for (int i = 0; i < weights.size(); i++) {
             for (int j = 0; j < weights[i].size(); j++) {
                 for (int k = 0; k < weights[i][j].size(); k++) {
-                    double roll = (double) rand() / RAND_MAX;
-                    if (roll >= 0.975) {
-                        child->weights[i][j][k] = (2 * ((double) rand() / RAND_MAX)) - 1.0;      //Completely re-randomize between [-1, 1]
+                    double roll = random(engine);
+                    if (roll >= 0.95) {
+                        child->weights[i][j][k] = (2 * random(engine)) - 1.0;      //Completely re-randomize between [-1, 1]
                     }
-                    else if (roll >= 0.85) {
-                        child->weights[i][j][k] += (((double) rand() / RAND_MAX) - 0.5) / 10;     //Modify by between [-0.05, 0.05]
+                    else if (roll >= 0.8) {
+                        child->weights[i][j][k] += (random(engine) * 0.15) - 0.075;     //Modify by between [-0.075, 0.075]
                     }
                     child->weights[i][j][k] = max(-2.0, min(2.0, child->weights[i][j][k]));
                 }
             }
             for (int j = 0; j < biases[i].size(); j++) {
-                double roll = (double)rand() / RAND_MAX;
-                if (roll >= 0.975) {
-                    child->biases[i][j] = (2 * ((double)rand() / RAND_MAX)) - 1.0;      //Completely re-randomize between [-1, 1]
+                double roll = random(engine);
+                if (roll >= 0.95) {
+                    child->biases[i][j] = (2 * random(engine)) - 1.0;      //Completely re-randomize between [-1, 1]
                 }
-                else if (roll >= 0.85) {
-                    child->biases[i][j] += (((double)rand() / RAND_MAX) - 0.5) / 10;     //Modify by between [-0.05, 0.05]
+                else if (roll >= 0.8) {
+                    child->biases[i][j] += (random(engine) * 0.15) - 0.075;     //Modify by between [-0.075, 0.075]
                 }
                 child->biases[i][j] = max(-2.0, min(2.0, child->biases[i][j]));
             }
@@ -443,6 +456,9 @@ public:
         for (int i = 0; i < weights.size(); i++) {
             output = calcOutput(output, i);
             output = sigmoid(output);
+        }
+        for (int i = 0; i < 4; i++) {
+            output[i] *= output[i] * output[i];
         }
         return output;
     }
@@ -475,7 +491,7 @@ public:
     }
 
 private:
-    void createRandomWeights() {
+    void createRandomWeights(uniform_real_distribution<double> random, default_random_engine engine) {
 
         /*Set up sizes for weight matrix*/
 
@@ -499,7 +515,7 @@ private:
         for (int i = 0; i < weights.size(); i++) {
             for (int j = 0; j < weights[i].size(); j++) {
                 for (int k = 0; k < weights[i][j].size(); k++) {
-                    weights[i][j][k] = ((double) rand() / RAND_MAX) - 0.5;
+                    weights[i][j][k] = random(engine) - 0.5;
                 }
             }
         }
@@ -511,7 +527,7 @@ private:
         for (int i = 0; i < layers.size(); i++) {
             biases[i].resize(layers[i]);
             for (int j = 0; j < biases[i].size(); j++) {
-                biases[i][j] = (2 * (double) rand() / RAND_MAX) - 1;
+                biases[i][j] = (2 * random(engine)) - 1;
             }
         }
     }
@@ -555,14 +571,12 @@ int main() {
     GameManager* manager = new GameManager(hero);
 
     //Brain* brain = new Brain(12, vector<int> {75, 75, 80, 60, 50, 4});
-    Brain* brains[50];
-    for (int i = 0; i < 50; i++) {
-        brains[i] = new Brain(12, vector<int> {16, 8, 4});
-    }
+    vector<vector<Brain*>> brains;
+
     vector<vector<long>> fitness;
-    vector<long> bestFitnesses;
+    vector<vector<long>> bestFitnesses;
     vector<double> avgFitnesses;
-    vector<vector<vector<char>>> runs;
+    vector<vector<vector<vector<char>>>> runs;
 
     auto endTime = chrono::high_resolution_clock().now();           //For automatic seed, if necessary
 
@@ -575,47 +589,51 @@ int main() {
 
     int numGenerations;             //Out here because it's used for various things later
 
+    //Set up randomness
+    default_random_engine engine;
+    uniform_real_distribution<double> rand(0.0, 1.0);
+
     if (runAI == 'n') {
         cout << "Press 's' for stats, or 'q' to quit." << endl;
     }
     else {
-
-        //Seed RNG
-        char manualSeed;
-        do {
-            cout << "Use set seed? [y/n]: ";
-            cin >> manualSeed;
-        } while (manualSeed != 'y' && manualSeed != 'n');
-        if (manualSeed == 'y') {
-            unsigned int RNGseed;
-            cout << "RNG Seed (positive int): ";
-            cin >> RNGseed;
-            srand(RNGseed);
-        }
-        else {
-            auto duration = chrono::duration_cast<chrono::microseconds>(endTime - startTime);
-            srand(duration.count());
-        }
-
         //Get number of generations to run
         cout << "Number of generations: ";
         cin >> numGenerations;
+
+        //Resize to fit numGenerations
         fitness.resize(numGenerations);
-        bestFitnesses.resize(numGenerations, 0);
+        bestFitnesses.resize(numGenerations);
         avgFitnesses.resize(numGenerations, 0.0);
         runs.resize(numGenerations);
+        brains.resize(numGenerations);
+
+        //Resize inner vectors to appropriate sizes
         for (int i = 0; i < numGenerations; i++) {
             fitness[i].resize(50, 0);
+            bestFitnesses[i].resize(5, -60);
             runs[i].resize(50);
+            brains[i].resize(50);
+            for (int j = 0; j < 50; j++) {
+                runs[i][j].resize(10);
+            }
+        }
+
+        for (int i = 0; i < 50; i++) {
+            brains[0][i] = new Brain(12, vector<int> {16, 8, 4}, rand, engine);
         }
     }
 
-    int brainIndex = 0;
-    int currentGeneration = 0;
+    int runIndex = 0;               //The current run (of 10) for the current brain
+    int brainIndex = 0;             //The current brain (of 50) for the current generation
+    int currentGeneration = 0;      //The current generation (of numGenerations)
+
+    long brainFitness = 0;          //Track total fitness for each brain's runs to average
 
 	//Keep dungeon loop active
 	bool runDungeon(true);
 	while (runDungeon) {
+        //Allow the user to play the RPG themself
         if (runAI == 'n') {
             char choice;
             manager->printOptions();
@@ -681,51 +699,68 @@ int main() {
                 runDungeon = false;
             }
         }
+        //Run AI through the RPG
         else {
 
             //Get the AI results
-            vector<double> choice = brains[brainIndex]->think(manager->calcInputs());
+            vector<double> choice = brains[currentGeneration][brainIndex]->think(manager->calcInputs());
 
             //Get the AI's choice
             char AIchoice = '1';
             double outputSum = choice[0] + choice[1] + choice[2] + choice[3];
-            double roll = (double) rand() / RAND_MAX;
+            double roll = rand(engine) * outputSum;
             for (int i = 0; i < 4; i++) {
-                roll -= choice[i] / outputSum;
+                roll -= choice[i];
                 if (roll <= 0) {
                     AIchoice = i + '1';
                     break;
                 }
             }
 
-            runs[currentGeneration][brainIndex].push_back(AIchoice);
+            runs[currentGeneration][brainIndex][runIndex].push_back(AIchoice);
             manager->processChoice(AIchoice, false);
 
             //If the current run ended
             int maxInvalidMoves = 20;
-            int maxTurns = 300;
+            int maxTurns = 200;
             if (hero->curHealth <= 0 || hero->invalidMoves >= maxInvalidMoves || hero->turnsSurvived >= maxTurns) {
-                /*if (hero->invalidMoves >= maxInvalidMoves) {
-                    cout << "--Run " << brainIndex + 1 << " ended! (INVALID MOVES)--" << endl;
-                }
-                if (hero->turnsSurvived >= maxTurns) {
-                    cout << "--Run " << brainIndex + 1 << " ended! (INDEFINITE SURVIVAL)--" << endl;
-                }*/
-                fitness[currentGeneration][brainIndex] = hero->calcFitness();                  //Calculate Brain's score
+
+                brainFitness += hero->calcFitness();
+                //fitness[currentGeneration][brainIndex] = hero->calcFitness();                  //Calculate Brain's score
                 
                 hero->resetHero(15, 25, 1, 1, 20, 5, 20);                   //Reset Hero stats
                 manager->inBattle = false;                                  //Reset game state
                 manager->inShop = false;
                 manager->resting = true;
                 
-                brainIndex++;                                               //Move to next Brain
+                runIndex++;                                                 //Move to next run
+
+                bool endEarly = false;
+                //Preliminary check after 3 runs
+                if (currentGeneration > 0 && runIndex == 3) {
+                    long currentAverage = brainFitness / 3;
+                    bool inBest = false;
+                    if (currentAverage >= bestFitnesses[currentGeneration - 1][4] - 20) {
+                        inBest = true;
+                    }
+                    if (!inBest) {
+                        endEarly = true;
+                    }
+                }
+                //If brain has completed 10 runs OR ending early
+                if (endEarly || runIndex == 10) {
+                    runIndex = 0;
+                    fitness[currentGeneration][brainIndex] = brainFitness / (endEarly ? 3 : 10);     //Get average fitness of brain
+                    brainFitness = 0;                                               //Reset for next brain
+                    brainIndex++;                                                   //Move to next Brain
+                }
 
                 //Check for end of current generation
                 if (brainIndex == 50) {
                     brainIndex = 0;
                     if (currentGeneration + 1 == numGenerations) {
                         cout << "-----Final generation processed!-----" << endl;
-                        runDungeon = false;                                 //If it was the final generation, end the program
+                        runDungeon = false;                                 //If it was the final generation, end the RPG
                     }
                     else {
                         cout << "-----Finished Generation " << currentGeneration + 1 << "-----" << endl;
@@ -741,12 +776,12 @@ int main() {
                     sort(begin(sortedFitness), end(sortedFitness));
 
                     //Getting indices for top 5 scores
-                    int best[5] = { 0 };
+                    int best[5] = {0};
                     for (int i = 0; i < 5; i++) {
                         best[i] = sortedFitness[49 - i].second;
+                        bestFitnesses[currentGeneration][i] = sortedFitness[49 - i].first;
                     }
 
-                    bestFitnesses[currentGeneration] = sortedFitness[49].first;
                     avgFitnesses[currentGeneration] = (double) totalFitness / 50;
 
                     //Print top 5 scores
@@ -759,30 +794,34 @@ int main() {
                     }
                     cout << endl;
 
-                    //Clear brains and repopulate from best
-                    int populateCounter = 0;
-                    for (int i = 0; i < 50; i++) {;
-                        bool isBest = false;
-                        for (int j = 0; j < 5; j++) {
-                            if (i == best[j]) {
-                                isBest = true;
-                                break;
+                    currentGeneration++;        //Increment to next generation
+                    if (currentGeneration != numGenerations) {
+
+                        //Clear brains and repopulate from best
+                        int populateCounter = 0;
+                        for (int i = 0; i < 50; i++) {
+                            ;
+                            bool isBest = false;
+                            for (int j = 0; j < 5; j++) {
+                                if (i == best[j]) {
+                                    isBest = true;
+                                    break;
+                                }
                             }
-                        }
-                        if (!isBest) {
-                            delete brains[i];
-                            if (populateCounter < 5) {
-                                brains[i] = new Brain(12, vector<int> {16, 8, 4});
-                                populateCounter++;
+                            if (isBest) {
+                                brains[currentGeneration][i] = brains[currentGeneration - 1][i];
                             }
                             else {
-                                brains[i] = brains[best[populateCounter++ % 5]]->reproduce();
+                                if (populateCounter < 5) {
+                                    brains[currentGeneration][i] = new Brain(12, vector<int> {16, 8, 4}, rand, engine);
+                                    populateCounter++;
+                                }
+                                else {
+                                    brains[currentGeneration][i] = brains[currentGeneration - 1][best[populateCounter++ % 5]]->reproduce(rand, engine);
+                                }
                             }
-                        }
+                        }   //END of repopulation logic
                     }
-
-                    currentGeneration++;
-
                 }   //END end-of-generation logic
             }   //END end-of-run logic
         }   //END AI-sim logic
@@ -795,21 +834,30 @@ int main() {
             cin >> checkGeneration;
             if (checkGeneration >= 1 && checkGeneration <= numGenerations) {
                 cout << "Generation number: " << checkGeneration-- << endl;
-                cout << "Best fitness: " << bestFitnesses[checkGeneration] << endl;
+                cout << "Best fitness: " << bestFitnesses[checkGeneration][0] << endl;
                 cout << "Average fitness: " << avgFitnesses[checkGeneration] << endl;
-                cout << "Which run would you like to examine? [1 to 50; 0 to skip]" << endl;
-                int checkRun;
-                cin >> checkRun;
-                if (checkRun >= 1 && checkRun <= 50) {
-                    checkRun--;
-                    for (int i = 0; i < runs[checkGeneration][checkRun].size(); i++) {
-                        manager->processChoice(runs[checkGeneration][checkRun][i], true);
+                cout << "Which brain would you like to examine? [1 to 50; 0 to skip]" << endl;
+                int checkBrain;
+                cin >> checkBrain;
+                if (checkBrain >= 1 && checkBrain <= 50) {
+                    checkBrain--;
+                    cout << "To examine a run, enter a number [0-9] || To view weights, enter 'w'" << endl;
+                    char checkRun;
+                    cin >> checkRun;
+                    if (checkRun >= '0' && checkRun <= '9') {
+                        checkRun -= '0';
+                        for (int i = 0; i < runs[checkGeneration][checkBrain][checkRun].size(); i++) {
+                            manager->processChoice(runs[checkGeneration][checkBrain][checkRun][i], true);
+                        }
+                        cout << "Final fitness: " << hero->calcFitness() << endl;
+                        hero->resetHero(15, 25, 1, 1, 20, 5, 20);                   //Reset Hero stats
+                        manager->inBattle = false;                                  //Reset game state
+                        manager->inShop = false;
+                        manager->resting = true;
                     }
-                    cout << "Final fitness: " << hero->calcFitness() << endl;
-                    hero->resetHero(15, 25, 1, 1, 20, 5, 20);                   //Reset Hero stats
-                    manager->inBattle = false;                                  //Reset game state
-                    manager->inShop = false;
-                    manager->resting = true;
+                    else if (checkRun == 'w') {
+                        brains[checkGeneration][checkBrain]->printWeights();
+                    }
                 }
             }
             else {
@@ -817,9 +865,12 @@ int main() {
             }
         }
     }
+    cout << "Wait a moment for memory management" << endl;
     delete hero;
     delete manager;
-    for (int i = 0; i < 50; i++) {
-        delete brains[i];
+    for (int i = 0; i < numGenerations; i++) {
+        for (int j = 0; j < 50; j++) {
+            delete brains[i][j];
+        }
     }
 }
